@@ -1,0 +1,300 @@
+---
+title: "DSII MIDTERM xm2276"
+author: "XIAO MA"
+date: "3/26/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+```{r, include=FALSE}
+library(ggplot2)
+library(ISLR)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(e1071)
+library(plotmo)
+library(splines)
+library(mgcv)
+library(pdp)
+library(earth)
+library(RNHANES)
+library(leaps)
+library(mlbench)
+library(pROC)
+library(pdp)
+library(vip)
+library(AppliedPredictiveModeling)
+library(gridExtra)
+library(mvtnorm)
+library(MASS)
+library(class)
+library(klaR)
+set.seed(2022)
+```
+
+```{r}
+data1 = read.csv("/Users/xiao/Desktop/train.csv") %>% 
+  janitor::clean_names() %>%
+  mutate(blue = as.factor(blue),
+         dual_sim = as.factor(dual_sim),
+         four_g = as.factor(four_g),
+         three_g = as.factor(three_g),
+         touch_screen = as.factor(touch_screen),
+         wifi = as.factor(wifi),
+         price_range = as.numeric(price_range),
+         price = case_when(
+           price_range == 0 ~ "low",
+           price_range == 1 ~ "low",
+           price_range == 2 ~ "high",
+           price_range == 3 ~ "high"),
+         price = as.factor(price))
+
+data = data1[,-c(18,21)]
+#Split the dataset into two parts: training data (70%) and test data (30%).
+set.seed(2276)
+indexTrain = createDataPartition(y = data$price, p = 0.7 , list = FALSE)
+train = data[indexTrain,]
+test = data[-indexTrain,]
+
+x_train <- model.matrix(price ~ ., data)[indexTrain,-20]
+y_train <- data$price[indexTrain]
+data_train <- subset(data[indexTrain,])
+
+# test data
+x_test <- model.matrix(price ~ ., data)[-indexTrain,-20]
+y_test <- data$price[-indexTrain]
+data_test <- subset(data[-indexTrain,])
+
+```
+
+
+```{r}
+#graphical summary
+x = train[,-c(2,4,6,18:20)]
+y = train$price
+
+theme1 = transparentTheme(trans = .4)
+trellis.par.set(theme1)
+featurePlot(x,
+            y,
+            scales = list(x=list(relation="free"), 
+                        y=list(relation="free")),
+            plot = "density", pch = "|", 
+            auto.key = list(columns = 2))
+
+pca <- prcomp(train[,-c(2,4,6,18:20)], center = TRUE,scale. = TRUE)
+summary(pca)
+library(devtools)
+```
+
+```{r}
+pairs(train)
+```
+
+
+```{r}
+#install_github("vqv/ggbiplot")
+library(ggbiplot)
+ggbiplot(pca)
+#numerical summary
+summary(train)
+```
+
+## model fitting
+
+```{r}
+ctrl <- trainControl(method = "cv", summaryFunction = twoClassSummary, classProbs = TRUE)
+```
+
+### logistic model
+```{r}
+set.seed(1)
+model.glm1 = glm(price ~.,data = data, subset = indexTrain, family = binomial(link = 'logit'))
+summary(model.glm1)
+
+#glm by caret
+model.glm = train(x = data[indexTrain,-c(2,4,6,18:20)],
+                  y = data$price[indexTrain],
+                  method = "glm",
+                  metric = "ROC",
+                  trControl = ctrl)
+summary(model.glm)
+```
+
+```{r}
+#confusion matrix for test data
+test.pred.prob = predict(model.glm1, newdata = data[-indexTrain,],
+                          type = "response")
+test.pred = rep("high", length(test.pred.prob))
+test.pred[test.pred.prob > 0.5] = "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = data$price[-indexTrain],
+                positive = "low")
+
+```
+
+
+```{r}
+##confusion matrix for train data
+test.pred.prob = predict(model.glm1, newdata =  data[indexTrain,],
+                          type = "response")
+test.pred = rep("high", length(test.pred.prob))
+test.pred[test.pred.prob > 0.5] = "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = train$price,
+                positive = "low")
+```
+
+```{r}
+# predict using test data
+test.pred.prob = predict(model.glm1, newdata = test, type = "response")
+
+# plot ROC curve and report AUC
+roc.glm = roc(test$price, test.pred.prob)
+```
+
+
+### Penalized logistic regression
+```{r}
+set.seed(1)
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
+.lambda = exp(seq(-8, -2, length = 20)))
+set.seed(1)
+model.glmn <- train(x = train[,-c(2,4,6,18:20)],
+                    y = train$price,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    metric = "ROC",
+                    trControl = ctrl)
+summary(model.glmn)
+
+#model.glmn$bestTune
+glmn.pred <- predict(model.glmn, newdata = test, type = "prob")[,2]
+roc.glmn <- roc(test$price, glmn.pred)
+```
+
+```{r}
+#confusion matrix
+test.pred <- rep("high", length(glmn.pred))
+test.pred[glmn.pred > 0.5] <- "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = data$price[-indexTrain],
+                positive = "low")
+```
+
+### LDA
+```{r}
+ctrl1 = trainControl(method = "repeatedcv", repeats = 5,
+                    summaryFunction = twoClassSummary,
+                    classProbs = TRUE)
+set.seed(1)
+# fit model on training and predict on test
+model.lda1 = lda(price ~ ., data = train)
+lda.pred = predict(model.lda1, newdata = test)
+#lda caret
+model.lda = train(price ~ .,
+                  data = train,
+                  method = "lda",
+                  metric = "ROC",
+                  trControl = ctrl1)
+
+set.seed(2022)
+lda.fit2 = lda(price~., data = data,
+               subset = indexTrain)
+par(mar = rep(2,4))
+plot(lda.fit2)
+# plot ROC curve
+roc.lda = roc(test$price, lda.pred$posterior[,2], levels = c("high", "low"))
+```
+
+
+### QDA
+```{r}
+set.seed(1)
+# fit model on trainning and predict on test
+model.qda1 = qda(price ~., data = train)
+qda.pred = predict(model.qda1, newdata = test)
+#qda in caret
+model.qda = train(price ~ .,
+                  data = train,
+                  method = "qda",
+                  metric = "ROC",
+                  trControl = ctrl)
+# plot ROC curve
+roc.qda = roc(test$price, qda.pred$posterior[,2],levels = c("high", "low"))
+```
+
+
+### MARS
+```{r}
+set.seed(1)
+model.mars = train(x = train[,-c(2,4,6,18:20)],
+                   y = train$price,
+                   method = "earth",
+                   tuneGrid = expand.grid(degree = 1:4,nprune = 2:20),
+                   metric = "ROC",trControl = ctrl)
+coef(model.mars$finalModel)
+mars.pred <- predict(model.mars, newdata = test, type = "prob")[,2]
+roc.mars <- roc(test$price, mars.pred)
+vip(model.mars$finalModel)
+pdp::partial(model.mars, pred.var = c("ram"), grid.resolution = 200) %>% autoplot()
+pdp::partial(model.mars, pred.var = c("px_height"), grid.resolution = 200) %>% autoplot()
+pdp::partial(model.mars, pred.var = c("px_width"), grid.resolution = 200) %>% autoplot()
+```
+
+
+```{r}
+#confusion matrix
+test.pred <- rep("high", length(mars.pred))
+test.pred[mars.pred > 0.5] <- "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = data$price[-indexTrain],
+                positive = "low")
+```
+
+### GAM
+```{r}
+set.seed(1)
+model.gam = train(x = data[indexTrain,-c(2,4,6,18:20)],
+                  y = data$price[indexTrain],
+                  method = "gam", 
+                  metric = "ROC",
+                  trControl = ctrl)
+model.gam$finalModel
+summary(model.gam)
+gam.pred = predict(model.gam, newdata = test, type = "prob")[,2]
+roc.gam = roc(test$price, gam.pred)
+```
+
+
+```{r}
+res = resamples(list( GLMN = model.glmn,
+                      MARS = model.mars,
+                      LDA = model.lda,
+                      QDA = model.qda,
+                      GAM = model.gam,
+                      GLM = model.glm))
+summary(res)
+bwplot(res, metric = "ROC")
+```
+
+
+### Model Comparison
+```{r}
+auc <- c(roc.glm$auc[1], roc.glmn$auc[1], roc.lda$auc[1], roc.qda$auc[1], roc.gam$auc[1], roc.mars$auc[1])
+plot(roc.glm, legacy.axes = TRUE)
+plot(roc.glmn, col = 2, add = TRUE)
+plot(roc.lda, col = 3, add = TRUE)
+plot(roc.qda, col = 4, add = TRUE)
+plot(roc.gam, col = 5, add = TRUE)
+plot(roc.mars, col = 6, add = TRUE)
+modelNames <- c("GLM","GLMN","LDA","QDA","GAM", "MARS")
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)),
+col = 1:6, lwd = 2)
+```
