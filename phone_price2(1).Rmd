@@ -1,5 +1,5 @@
 ---
-output: word_document
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
@@ -45,7 +45,7 @@ library(cutpointr)
 df = read.csv("train.csv")
 
 # covert outcome to binary
-df$price_range = as.factor(ifelse(df$price_range == 3, "High", "Low"))
+df$price_range = as.factor(ifelse(df$price_range >=2, "High", "Low"))
 
 # convert data format
 df = df %>% 
@@ -63,7 +63,7 @@ test_df = df[-train_index, ]
 ```
 
 
-```{reval=F}
+```{r}
 # user parallel to accelarate 
 cl <- makePSOCKcluster(4)
 registerDoParallel(cl)
@@ -72,7 +72,7 @@ registerDoParallel(cl)
 
 ## Bagging
 
-```{r eval=F}
+```{r }
 ctrl <- trainControl(method = "cv", classProbs = TRUE, 
                      summaryFunction = twoClassSummary) 
 
@@ -95,7 +95,7 @@ ggplot(bagging.fit, highlight = TRUE)
 
 ## Random forest
 
-```{r eval=F}
+```{r }
 ctrl <- trainControl(method = "cv", classProbs = TRUE, 
                      summaryFunction = twoClassSummary) 
 
@@ -119,7 +119,7 @@ ggplot(rf.fit, highlight = TRUE)
 
 ## AdaBoost
 
-```{r eval=F}
+```{r }
 gbm.grid <- expand.grid(n.trees = c(2000,3000,4000,5000), 
                         interaction.depth = 1:6, 
                         shrinkage = c(0.0005,0.001,0.002), 
@@ -143,7 +143,7 @@ ggplot(gbm.fit, highlight = TRUE)
 
 ## SVM
 
-```{r eval=F}
+```{r }
 set.seed(1)
 svm.fit = train(price_range ~ . , 
                  df, 
@@ -219,5 +219,21 @@ summary(cp)
 
 ```{r}
 test_df$pred.gbm = as.factor(ifelse(pred.gbm > cp$optimal_cutpoint, "High", "Low"))
-confusionMatrix(test_df$pred.gbm, test_df$price_range)
+cft = confusionMatrix(test_df$pred.gbm, test_df$price_range)
+print(cft)
 ```
+
+In order to predict the high cost phone, we decided to build a binary classification model. We randomly divided our dataset into two data sets before training the classification algorithms: the training and the test sets. The training and test sets each included 80% and 20% of the total data, respectively. The parameters of each algorithm were determined based on the classification performance of the training set as measured by five-fold cross-validation. On the test set, the performance of all algorithms was tested and compared. We evaluated and compared the results of five different algorithms since different classification methods are better suited to different types of data. Bagging, random forest, ada boosting, and radical kernel SVM are among the models under consideration.
+
+We plotted the ROC curves of all the different algorithms on the test dataset. Over all reasonable sensitivity thresholds and recall thresholds, the ada boosting model is consistently better than all the other models. The feature importance of the ADA boosting model is scaled between 0 and 100. Random access memory (RAM) is the most important predictor. Battery power is 20% as important as RAM. Pixel height and pixel width are each around 10% as important as RAM. All the other predictors are less than 5% as important as RAM.
+
+For the first six test cases and label combinations, we utilized LIME to visually represent the explanations. Positively associated features are displayed in blue, while negatively correlated features are displayed in red. We can observe that all of the predictors for the phone pricing outcome selected the same features, showing that these are important features both locally and globally.
+
+We selected to maximize the sum of sensitivity and specificity in order to determine the best cut point for the prediction probability. On the training dataset, the best cut point is `r cp$optimal_cutpoint`, which yields an accuracy of `r cp$acc`, a sensitivity of `r cp$sensitivity`, and a specificity of `r cp$specificity`. On the test dataset, we have an accuracy of `r cft$overall[1]`, sensitivity of `r cft$byClass[1]`, and specificity of `r cft$byClass[2]` using the optimal cut point. As a consequence, our model appears to be extremely effective in predicting high prices for phones.
+
+
+
+
+
+
+
