@@ -1,0 +1,223 @@
+---
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.height = 8,
+  fig.width = 12,
+  dpi = 200, 
+  message = F,
+  echo = T,
+  warning = F,
+  cache = T
+)
+# theme_set(theme_minimal() + theme(
+#   legend.position = "bottom",
+#   plot.title = element_text(hjust = 0.5)
+# ))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  digits = 3
+)
+# scale_colour_discrete = scale_colour_viridis_d
+# scale_fill_discrete = scale_fill_viridis_d
+```
+
+
+```{r}
+# library(reticulate)
+library(caret)
+library(tidyverse)
+library(ggpubr)
+library(doParallel)
+library(ranger)
+library(pROC)
+library(gbm)
+library(pdp)
+library(lime)
+library(cutpointr)
+```
+
+```{r}
+# read data
+df = read.csv("train.csv")
+
+# covert outcome to binary
+df$price_range = as.factor(ifelse(df$price_range == 3, "High", "Low"))
+
+# convert data format
+df = df %>% 
+    mutate_at(vars("blue", "dual_sim", "four_g", "three_g", "touch_screen", "wifi"), 
+              ~factor(., levels = c(0, 1), labels = c("No", "Yes")))
+```
+
+
+```{r data_preprocess}
+# split into training set
+set.seed(1)
+train_index = createDataPartition(df$price_range,p=0.8,list = F)
+train_df = df[train_index, ]
+test_df = df[-train_index, ]
+```
+
+
+```{reval=F}
+# user parallel to accelarate 
+cl <- makePSOCKcluster(4)
+registerDoParallel(cl)
+```
+
+
+## Bagging
+
+```{r eval=F}
+ctrl <- trainControl(method = "cv", classProbs = TRUE, 
+                     summaryFunction = twoClassSummary) 
+
+bagging.grid <- expand.grid(mtry = 20, 
+                       splitrule = "gini",
+                       min.node.size = seq(from = 2, to = 10, by = 2))
+set.seed(1) 
+bagging.fit <- train(price_range ~ . , 
+                df, 
+                subset = train_index, 
+                tuneGrid = bagging.grid, 
+                method = "ranger",
+                metric = "ROC",
+                trControl = ctrl)
+```
+
+```{r}
+ggplot(bagging.fit, highlight = TRUE)
+```
+
+## Random forest
+
+```{r eval=F}
+ctrl <- trainControl(method = "cv", classProbs = TRUE, 
+                     summaryFunction = twoClassSummary) 
+
+rf.grid <- expand.grid(mtry = 1:8, 
+                       splitrule = "gini",
+                       min.node.size = seq(from = 2, to = 10, by = 2))
+set.seed(1) 
+rf.fit <- train(price_range ~ . , 
+                df, 
+                subset = train_index, 
+                tuneGrid = rf.grid, 
+                method = "ranger",
+                metric = "ROC",
+                trControl = ctrl)
+```
+
+
+```{r}
+ggplot(rf.fit, highlight = TRUE)
+```
+
+## AdaBoost
+
+```{r eval=F}
+gbm.grid <- expand.grid(n.trees = c(2000,3000,4000,5000), 
+                        interaction.depth = 1:6, 
+                        shrinkage = c(0.0005,0.001,0.002), 
+                        n.minobsinnode = 1)
+set.seed(1) 
+gbm.fit <- train(price_range ~ . , 
+                 df, 
+                 subset = train_index, 
+                 tuneGrid = gbm.grid, 
+                 trControl = ctrl,
+                 method = "gbm",
+                 distribution = "adaboost",
+                 metric = "ROC",
+                 verbose = FALSE)
+```
+
+
+```{r}
+ggplot(gbm.fit, highlight = TRUE)
+```
+
+## SVM
+
+```{r eval=F}
+set.seed(1)
+svm.fit = train(price_range ~ . , 
+                 df, 
+                 subset = train_index, 
+                method = "svmRadialCost",
+                tuneGrid = data.frame(C = exp(seq(-3,3,len=20))),
+                trControl = ctrl,
+                metric = "ROC",
+                prob.model = TRUE,
+                 verbose = FALSE)
+```
+
+
+```{r}
+plot(svm.fit)
+```
+
+
+## ROC camparison
+
+```{r}
+pred.bagging = predict(bagging.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.bagging = pROC::roc(df$price_range[-train_index], pred.bagging)
+pred.rf = predict(rf.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.rf = pROC::roc(df$price_range[-train_index], pred.rf)
+pred.gbm = predict(gbm.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.gbm = pROC::roc(df$price_range[-train_index], pred.gbm)
+pred.svm = predict(svm.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.svm = pROC::roc(df$price_range[-train_index], pred.svm)
+
+plot(roc.bagging, col = 1) 
+plot(roc.rf, add = TRUE, col = 2)
+plot(roc.gbm, add = TRUE, col = 3)
+plot(roc.svm, add = TRUE, col = 4)
+auc <- c(roc.bagging$auc[1], roc.rf$auc[1], roc.gbm$auc[1], roc.svm$auc[1])
+modelNames <- c("Bagging", "RF","Adaboost", "SVM") 
+legend("bottomright", 
+       legend = paste0(modelNames, ": ", 
+                       round(auc,3)), 
+       col = 1:4, lwd = 2)
+```
+
+
+## Global Importance
+
+```{r}
+gbmImp <- varImp(gbm.fit, scale = TRUE)
+plot(gbmImp, top = 10)
+```
+
+
+## LIME
+
+```{r fig.height=18, fig.width=12}
+explainer.rf <- lime(df[train_index, -21], gbm.fit)
+new_obs = df[-train_index, -21][1:6, ]
+explaination.obs = explain(new_obs, 
+                           explainer = explainer.rf,
+                           n_features = 10,
+                           n_labels = 2)
+plot_features(explaination.obs)
+```
+
+## Prediction error
+
+```{r}
+pred.gbm.train = predict(gbm.fit, newdata = df[train_index, ], type = "prob")[, 1]
+train_df$pred.gbm = pred.gbm.train
+cp <- cutpointr(train_df, pred.gbm, price_range, 
+                method = maximize_metric, metric = sum_sens_spec)
+summary(cp)
+```
+
+```{r}
+test_df$pred.gbm = as.factor(ifelse(pred.gbm > cp$optimal_cutpoint, "High", "Low"))
+confusionMatrix(test_df$pred.gbm, test_df$price_range)
+```
