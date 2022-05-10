@@ -1,0 +1,44 @@
+---
+title: "p8106_midterm_report"
+author: "Hao Zheng (hz2770)"
+date: "3/24/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+For Bob, who just started his mobile company, he wants to find out the relationship between different mobile features and the final price to predict the price of his mobile phone. Therefore, he collected the price of different mobile phones from various companies. This dataset is on Kaggle, with price range as a categorical variables.\
+## Exploratory Analysis
+Before fitting the models, let's conduct exploratory data analysis. The mobile dataset contains 2000 observations, 20 predictors and 1 response variable `price_range`. Among all the predictors, `blue`, `dual_sim`, `four_g`, `three_g`, `touch_screen` and `wifi` are factor variables, the rest are numeric variables. Since I'm only interested in predicting the price to be either low or high, I combine the 4 original levels of response variable to be of 2 levels, with 0 and 1 as "low", 2 and 3 as "high". First, from the correlation plot (Figure 1), we can see most of the predictors do not have a significant correlation with others, except for `pc` and `fc`, `px_width` and `px_height`, `sc_w` and `sc_h`, each pairs have positive correlations. Remember this unclear colinearity indicates that the GAM model may be a good choice.\
+Next, I use feature plot(Fogure 2) to present the density plot of different predictors for different price ranges. Here, feature plot is only applied to numeric predictors. For most of the features, there is no clear difference for different price range levels. However, there is a clear difference of Random Access Memory for different price, higher price tends to have higher Random Access Memory. Price range also differs in pixel resolution width and battery power, high price tend to have large value of these two variables. After analyzing using feature plot, the relationship between each predictors and the response is still not clear.\
+## Models Fitting
+Now let's fit the predictive models. I randomly devide the mobile data into two dataset: training set(70% of the total dataset) and test set. Next, I fit 6 different model: GLM, Ridge, GAM, MARS, LDA and QDA models using the Caret package in R. Also a repeated cross validation is conducted during the model fitting process. Then, after comparing the ROC, I choose MARS model as our final model and fit the plot of the ROC curves.\
+### GLM
+First, I try to fit a Logistic Regression model using Caret and see its performance since it's the easiest one. This model includes all of the predictors, taking dispersion parameter to be 1. However, as we can see from the p-value in the summary, lots of the predictors do not have a significant effect on the response. Only the predictors `battery_power`, `mobile_wt`, `n_cores`, `px_height`, `px_width` and `ram` are quite significant/important in the GLM models. There is no tuning parameters in this model. GLM is not so flexible and may be overfitting sometimes.\
+The GLM models does not consider potential interaction and it's linear. It may work well on model with not much collinearity between different predictors, which quite fits our data. There may also have potential outliers.\
+### Ridge
+Since GLM may not be very optimal. Now let's consider Ridge Regression. Ridge introduces a small penalty term to reduce the variance. It has one tuning parameter lambda, which is selected by computing the cross validation error rate for a grid of lambda value and choose the lambda with the smallest error rate, then refit the model. The chosen lambda in our ridge model is lambda = 0.1353353.\
+However, Ridge also includes all of the predictors and may do poorly in providing a clear interpretation.\
+### GAM
+I also try to perform Generalized additive model(GAM) model, which introduces some nonlinearities in several variables without changing the additive structure of linear models. \
+The GAM model can automatically identify non-linear relationship and will potentially have more accuracy in prediction. But by using the GAM model from Caret, there may be a potential lost of significant amount of flexibility. 
+### MARS
+Also fit a Multivariate Adaptive Regression Splines(MARS) model for the mobile data. It automatically selects cut points, and has two tuning parameters: degree of features and number of terms. Here, I allow the model to have three degrees of interaction terms and choose nprune to be selected from 2: 25. The final GAM model we select has 1 degree and 7 of 12 terms. In the final model, nprune is 7, and 4 out of 20 predictors are chosen, which are random access memory, battery power, pixel width and pixel height.\
+MARS is more flexible than linear models, and it's easier to interpret than GAM. However, sometimes, it may not be a really good fit.\ 
+### LDA and QDA
+I also fit a linear discriminate analysis model and a quadratic discriminate analysis. LDA assumes normally distributed features and helps a lot in dimension reduction. Since k=2, we only have k - 1 = 1 linear discriminant.\
+LDA is quite robust, but in order to conduct more flexible model, we use QDA, who's quite similar to LDA, but with quadratic boundaries. However, which of these two methods work better mainly depends on the data itself.\
+
+## Model Comparison
+To decide which model fits better, I conduct a resample comparison on the training data. From the box plot, we can see GLM and MARS model have rather high values of ROC. We then make predictions on the test data and plot the ROC curves for each model. 
+
+## Conclusion
+In conclusion, the mobile dataset is a rather\
+
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
