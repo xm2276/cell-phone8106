@@ -33,10 +33,10 @@ I also fit a linear discriminate analysis model and a quadratic discriminate ana
 LDA is quite robust, but in order to conduct more flexible model, we use QDA, who's quite similar to LDA, but with quadratic boundaries. However, which of these two methods work better mainly depends on the data itself.\
 
 ## Model Comparison
-To decide which model fits better, I conduct a resample comparison on the training data. From the box plot, we can see GLM and MARS model have rather high values of ROC. We then make predictions on the test data and plot the ROC curves for each model. 
+To decide which model fits better, I conduct a resample comparison on the training data. We compare all five models except Ridge. From the box plot (Figure 5), we can see the GLM and MARS model have rather high values of ROC. We then make predictions on the test data and plot the ROC curves for each model (Figure 6). The GLM model has the largest AUC value (the area under the ROC curve), and LDA, QDA model have a small AUC value. And as we can see from the vip plot (Figure 4) of the MARS model, Random access memory, battery power, pixel width and pixel height may be the most four important variables here in this model.
 
 ## Conclusion
-In conclusion, the mobile dataset is a rather\
+In conclusion, the mobile dataset is a rather big dataset with many observations and small collinearity between different variables. After exploratory data analysis, we observe that only a few predictors have a clear relationship with our response variable price range. After fitting the Generalized linear model, Ridge regression, Generalized additive model, Multivariate adaptive regression splines, Linear discriminate analysis and Quadratic discriminate analysis. After comparing the cross-validation results on the training data using ROC as criteria, we think the GLM and MARS model fits best. 
 
 
 ```{r pressure, echo=FALSE}

@@ -79,7 +79,7 @@ registerDoParallel(cl)
 ctrl <- trainControl(method = "cv", classProbs = TRUE, 
                      summaryFunction = twoClassSummary) 
 
-bagging.grid <- expand.grid(mtry = 20, 
+bagging.grid <- expand.grid(mtry = 20, # mtry = number of the predictors
                        splitrule = "gini",
                        min.node.size = seq(from = 2, to = 10, by = 2))
 set.seed(1) 
@@ -95,6 +95,37 @@ bagging.fit <- train(price_range ~ . ,
 ```{r}
 ggplot(bagging.fit, highlight = TRUE)
 ```
+
+```{r}
+# Permutation based importance
+set.seed(1)
+bagging.final.per <- ranger(price_range ~.,
+                       df[train_index, ],
+                       mtry = bagging.fit$bestTune[[1]],
+                       splitrule = "gini",
+                       min.node.size = bagging.fit$bestTune[[3]],
+                       importance = "permutation",
+                       scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(bagging.final.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan", "blue"))(20))
+
+# Impurity based importance
+set.seed(1)
+bagging.final.imp <- ranger(price_range~ .,
+                       df[train_index, ],
+                       mtry = bagging.fit$bestTune[[1]],
+                       splitrule = "gini",
+                       min.node.size = bagging.fit$bestTune[[3]],
+                       importance = "impurity")
+barplot(sort(ranger::importance(bagging.final.imp), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan", "blue"))(20))
+```
+Since we have response variables, we consider the problem to be supervised learning. Therefore, the unsupervised learning methods (such as clustering and deep learning) are not suitable for this problem.
+
+For the models we learned in the second half of this semester, we start with Bagging for classification problem. Bagging is a method which use bootstrap to reduce the variance. Though bagging can improve the predictive accuracy, it may be difficult to interpret since it's impossible to represent the results as a single tree. In the classification setting, we used Gini index to obtain the variable importance information, predictors with the larger total decrease in the Gini index are considered more important. Here, we use caret to do grid search, then choose the node size with the highest ROC value.
+
 
 ## Random forest
 
@@ -115,10 +146,12 @@ rf.fit <- train(price_range ~ . ,
                 trControl = ctrl)
 ```
 
-
 ```{r}
 ggplot(rf.fit, highlight = TRUE)
 ```
+
+After analyzing the variable importance in the bagging model, we realize that the variable `ram` is of great importance, which may cause bagging less valid in decreasing the variance since all of the bagged trees will look quite similar with top split at `ram`. Therefore, we fit a random forest model, which is an improved method of bagging by decorrelating the trees. It only consider a subset of predictors at each split so as to make the bagged trees less correlated with each other.
+
 
 ## AdaBoost
 
@@ -139,30 +172,51 @@ gbm.fit <- train(price_range ~ . ,
                  verbose = FALSE)
 ```
 
-
 ```{r}
 ggplot(gbm.fit, highlight = TRUE)
 ```
+Next, because the outcome of the mobile dataset is binary, we fit a gbm model to do boosting. Boosting is quite similar to bagging except it build trees using information from the previous tree. There are three tuning parameters in boosting: The number of trees B, which are selected using cross-validation; Shrinkage parameter $\lambda$ which controls the learning rate; And d, the number of splits in each tree which controls the complexity. From the result, we can see that the optimal situation is reached when B = 5000, $\lambda$ = 0.002, d = 5.
+
 
 ## SVM
 
 ```{r }
+# Tune over both cost and sigma
+# set.seed(1)
+# svmr.fit <- train(price_range ~ . , 
+#                   df, 
+#                   subset = train_index, 
+#                   method = "svmRadialSigma",
+#                   tuneGrid = data.frame(C = exp(seq(-1,4,len=20)),
+#                                         sigma = exp(seq(-6,-2,len=20))),
+#                   trControl = ctrl,
+#                   metric = "ROC",
+#                   prob.model = TRUE,
+#                   verbose = FALSE)
+# myCol <- rainbow(20)
+# myPar <- list(surpose.symbol = list(col = myCol),
+#               surpose.line = list(col = myCol))
+# plot(svmr.fit, highlight = TRUE, par.settings = myPar)
+
+
+# Tune over cost
 set.seed(1)
 svm.fit = train(price_range ~ . , 
-                 df, 
-                 subset = train_index, 
+                df, 
+                subset = train_index, 
                 method = "svmRadialCost",
                 tuneGrid = data.frame(C = exp(seq(-3,3,len=20))),
                 trControl = ctrl,
                 metric = "ROC",
                 prob.model = TRUE,
-                 verbose = FALSE)
+                verbose = FALSE)
+summary(svm.fit)
 ```
-
 
 ```{r}
 plot(svm.fit)
 ```
+Now consider to fit another classic classification model: support vector machine with radical kernel. There are two tuning parameters for SVM, cost and sigma. Here, we only tune on cost.
 
 
 ## ROC camparison
