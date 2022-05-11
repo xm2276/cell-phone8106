@@ -1,0 +1,43 @@
+---
+title: "Final_report"
+author: "XIAO MA"
+date: "5/10/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+### Describe your data set. Provide proper motivation for your work.
+###  •	What questions are you trying to answer?
+
+In this digital era, mobile phones are no longer just a communication tool but have become a necessity in our daily life. Cell phone prices are from hundreds to thousands, and what is the major difference between these mobile. Our motivation for this project is to understand what the features such as RAM, 4G are relates to the price of the mobile. Relations between features of a mobile phone and its selling price (low or high). This project can help us to have a better understanding of mobile selling prices to better choose a cost-effective phone. It could also give the mobile company an idea of which mobile feature they need to work on. The data are collected on cellphone sales from multiple companies. There are 2000 rows and 21 columns. \
+
+### •	How did you prepare and clean the data?
+The mobile dataset contains 2000 observations, 20 predictors and 1 response variable `price_range`. Among all the predictors, `blue`, `dual_sim`, `four_g`, `three_g`, `touch_screen` and `wifi` are factor variables, the rest are numeric variables. Since we only interested in the relationship between features and price low or high rather than a specific price, we convert original 4-levels to a binary response with 0 and 1 as "low", 2 and 3 as "high".\
+
+After cleaning the data, the dataset was spilt to 70% training data and 30% testing. The training data has 1400 rows and 20 variables, and the testing has 600 rows and 20 variables. There is no missing data.\
+
+## Exploratory analysis/visualization
+### •	Is there any interesting structure present in the data?
+### •	What were your findings?
+
+According to the correlation plot (Figure 1),most of the predictors do not have a significant correlation with others, except for `pc` and `fc`, `px_width` and `px_height`, `sc_w` and `sc_h`, each pairs have positive correlations.The unclear colinearity indicates that the GAM model might be a good choice.\
+From feature plot(Fogure 2), there is no clear difference for different price range levels. However, there is a clear difference of Random Access Memory for different price, higher price tends to have higher Random Access Memory. Price range also differs in pixel resolution width and battery power, high price tend to have large value of these two variables. There is no obvious correlation between each variable, neither does multicollinearity.\
+
+
+## Models
+
+•	What predictor variables did you include?
+•	What technique did you use? What assumptions, if any, are being made by using this technique?
+•	If there were tuning parameters, how did you pick their values?
+•	Discuss the training/test performance if you have a test data set.
+•	Which variables play important roles in predicting the response?
+•	Explain/visualize the final model you select.
+•	What are the limitations of the models you used (if there are any)? Are the models flexible enough to capture the underlying truth?
+
+## Conclusions
+•	What were your findings? Are they what you expect? What insights into the data can you make?
+
