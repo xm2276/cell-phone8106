@@ -68,7 +68,7 @@ library(cutpointr)
 df = read.csv("data/train.csv")
 
 # covert outcome to binary
-df$price_range = as.factor(ifelse(df$price_range >=2, "High", "Low"))
+df$price_range = as.factor(ifelse(df$price_range >= 2, "High", "Low"))
 
 # convert data format
 df = df %>% 
@@ -81,22 +81,12 @@ df = df %>%
 # split into training set
 set.seed(1)
 train_index = createDataPartition(df$price_range,p=0.8,list = F)
-train_df = df[train_index, ]
-test_df = df[-train_index, ]
-
-# train data
-x_train <- model.matrix(price_range ~ ., df)[train_index, -21]
-y_train <- df$price_range[train_index]
-data_train <- subset(df[train_index,])
-
-# test data
-x_test <- model.matrix(price_range ~ ., df)[-train_index,-21]
-y_test <- df$price_range[-train_index]
+train_df = df[train_index,]
+test_df = df[-train_index,]
 
 ctrl <- trainControl(method = "cv", classProbs = TRUE, 
                      summaryFunction = twoClassSummary) 
 ```
-
 
 ```{r}
 # user parallel to accelarate 
@@ -104,17 +94,29 @@ cl <- makePSOCKcluster(4)
 registerDoParallel(cl)
 ```
 
+```{r}
+#graphical summary: Feature plot
+x = train_df[,-c(2,4,6,18:21)]
+y = train_df$price_range
+
+theme1 = transparentTheme(trans = .4)
+trellis.par.set(theme1)
+featurePlot(x,
+            y,
+            scales = list(x=list(relation="free"), 
+                          y=list(relation="free")),
+            plot = "density", pch = "|", 
+            auto.key = list(columns = 2))
+```
+
 ## model fitting
 
 ### logistic model
 ```{r}
 set.seed(1)
-glm.fit = glm(price_range ~.,data = df, subset = train_index, family = binomial(link = 'logit'))
-summary(glm.fit)
-
 #glm by caret
-glm.fit = train(x = df[train_index,-c(2,4,6,18:20)],
-                y = df$price_range[train_index],
+glm.fit = train(x = train_df[, c(1:20)],
+                y = train_df$price_range,
                 method = "glm",
                 metric = "ROC",
                 trControl = ctrl)
@@ -124,26 +126,12 @@ summary(glm.fit)
 ```{r}
 #confusion matrix for test data
 test.pred.prob = predict(glm.fit, newdata = df[-train_index,],
-                         type = "response")
-test.pred = rep("high", length(test.pred.prob))
-test.pred[test.pred.prob > 0.5] = "low"
-confusionMatrix(data = as.factor(test.pred),
-                reference = df$price_range[-train_index],
-                positive = "low")
-
-```
-
-
-```{r}
-##confusion matrix for train data
-test.pred.prob = predict(glm.fit, newdata =  df[train_index,],
-                          type = "response")
-test.pred = rep("high", length(test.pred.prob))
-test.pred[test.pred.prob > 0.5] = "low"
-confusionMatrix(data = as.factor(test.pred),
-                reference = df$price_range[train_index,],
-                positive = "low")
-```
+                         type = "prob")
+test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+confusionMatrix(test.pred,
+                df$price_range[-train_index],
+                "High")
+# Accuracy of test data classification: 0.985```
 
 
 ### Penalized logistic regression
@@ -152,26 +140,78 @@ set.seed(1)
 glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
 .lambda = exp(seq(-8, -2, length = 20)))
 set.seed(1)
-model.glmn <- train(x = train[,-c(2,4,6,18:20)],
-                    y = train$price,
-                    method = "glmnet",
-                    tuneGrid = glmnGrid,
-                    metric = "ROC",
-                    trControl = ctrl)
-summary(model.glmn)
-
-glmn.pred <- predict(model.glmn, newdata = test, type = "prob")[,2]
-roc.glmn <- roc(test$price, glmn.pred)
+#-c(2,4,6,18:21)
+glmn.fit <- train(x = train_df[, -c(2,4,6,18:22)],
+                  y = train_df$price_range,
+                  method = "glmnet",
+                  tuneGrid = glmnGrid,
+                  metric = "ROC",
+                  trControl = ctrl)
+summary(glmn.fit)
 ```
 
 ```{r}
+#confusion matrix for the test data
+# test.pred.prob = predict(glmn.fit, newdata = df[-train_index,],
+#                          type = "prob")
+# test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+# confusionMatrix(test.pred,
+#                 df$price_range[-train_index],
+#                 "High")
+
 #confusion matrix
-test.pred <- rep("high", length(glmn.pred))
-test.pred[glmn.pred > 0.5] <- "low"
+glmn.pred <- predict(glmn.fit, newdata = df[-train_index,], type = "prob")[,1]
+test.pred <- rep("Low", length(glmn.pred))
+test.pred[glmn.pred > 0.5] <- "High"
 confusionMatrix(data = as.factor(test.pred),
-                reference = data$price[-indexTrain],
-                positive = "low")
+                reference = df$price_range[-train_index],
+                positive = "High")
+# Accuracy of test data classification: 0.99
 ```
+
+
+### MARS
+```{r}
+#[,-c(2,4,6,18:21)]
+set.seed(1)
+mars.fit = train(x = train_df[,c(1:20)],
+                 y = train_df$price_range,
+                 method = "earth",
+                 tuneGrid = expand.grid(degree = 1:3,nprune = 2:25),
+                 metric = "ROC", 
+                 trControl = ctrl)
+coef(mars.fit$finalModel)
+vip(mars.fit$finalModel)
+pdp::partial(mars.fit, pred.var = c("ram"), grid.resolution = 200) %>% autoplot()
+pdp::partial(mars.fit, pred.var = c("px_height"), grid.resolution = 200) %>% autoplot()
+pdp::partial(mars.fit, pred.var = c("px_width"), grid.resolution = 200) %>% autoplot()
+```
+
+
+```{r}
+#confusion matrix
+test.pred.prob = predict(mars.fit, newdata = df[-train_index,],
+                         type = "prob")
+test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+confusionMatrix(test.pred,
+                df$price_range[-train_index],
+                "High")
+# Accuracy of test data classification: 0.98
+```
+
+
+### GAM
+```{r}
+set.seed(1)
+gam.fit = train(x = train_df[, c(1:20)],
+                y = train_df$price_range,
+                method = "gam", 
+                metric = "ROC",
+                trControl = ctrl)
+gam.fit$finalModel
+summary(gam.fit)
+```
+
 
 ### Bagging
 
@@ -293,8 +333,14 @@ plot(svm.fit)
 
 ## ROC camparison
 ```{r}
-test.pred.prob = predict(glm.fit, newdata = df[-train_index,], type = "response")
-roc.glm = roc(df$price_range[-train_index,], test.pred.prob)
+pred.glm = predict(glm.fit, newdata = df[-train_index,], type = "prob")[,1]
+roc.glm = pROC::roc(df$price_range[-train_index], pred.glm)
+pred.glmn <- predict(glmn.fit, newdata = df[-train_index,], type = "prob")[,1]
+roc.glmn <- pROC::roc(df$price_range[-train_index], pred.glmn)
+pred.mars <- predict(mars.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.mars <- pROC::roc(df$price_range[-train_index], pred.mars)
+pred.gam = predict(gam.fit, newdata = df[-train_index,], type = "prob")[,1]
+roc.gam = pROC::roc(df$price_range[-train_index], pred.gam)
 ```
 
 ```{r}
@@ -307,16 +353,20 @@ roc.gbm = pROC::roc(df$price_range[-train_index], pred.gbm)
 pred.svm = predict(svm.fit, newdata = df[-train_index, ], type = "prob")[,1]
 roc.svm = pROC::roc(df$price_range[-train_index], pred.svm)
 
-plot(roc.bagging, col = 1) 
-plot(roc.rf, add = TRUE, col = 2)
-plot(roc.gbm, add = TRUE, col = 3)
-plot(roc.svm, add = TRUE, col = 4)
-auc <- c(roc.bagging$auc[1], roc.rf$auc[1], roc.gbm$auc[1], roc.svm$auc[1])
-modelNames <- c("Bagging", "RF","Adaboost", "SVM") 
+plot(roc.glm, col = 1) 
+plot(roc.glmn, add = TRUE, col = 2)
+plot(roc.mars, add = TRUE, col = 3)
+plot(roc.gam, add = TRUE, col = 4)
+plot(roc.bagging, add = TRUE, col = 5) 
+plot(roc.rf, add = TRUE, col = 6)
+plot(roc.gbm, add = TRUE, col = 7)
+plot(roc.svm, add = TRUE, col = 8)
+auc <- c(roc.glm$auc[1], roc.glmn$auc[1], roc.mars$auc[1], roc.gam$auc[1], roc.bagging$auc[1], roc.rf$auc[1], roc.gbm$auc[1], roc.svm$auc[1])
+modelNames <- c("Glm", "Glmn", "MARS", "GAM", "Bagging", "RF","Adaboost", "SVM") 
 legend("bottomright", 
        legend = paste0(modelNames, ": ", 
                        round(auc,3)), 
-       col = 1:4, lwd = 2)
+       col = 2:4, lty = 1, cex=0.8, pt.cex = 1)
 ```
 
 
@@ -355,6 +405,7 @@ test_df$pred.gbm = as.factor(ifelse(pred.gbm > cp$optimal_cutpoint, "High", "Low
 cft = confusionMatrix(test_df$pred.gbm, test_df$price_range)
 print(cft)
 ```
+
 * Since we have response variables, we consider the problem to be supervised learning. Therefore, the unsupervised learning methods (such as clustering and deep learning) are not suitable for this problem.
 
 * For the models we learned in the second half of this semester, we start with Bagging for classification problem. Bagging is a method which use bootstrap to reduce the variance. Though bagging can improve the predictive accuracy, it may be difficult to interpret since it's impossible to represent the results as a single tree. In the classification setting, we used Gini index to obtain the variable importance information, predictors with the larger total decrease in the Gini index are considered more important. Here, we use caret to do grid search, then choose the node size with the highest ROC value.
