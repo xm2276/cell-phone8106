@@ -30,13 +30,33 @@ options(
 
 
 ```{r}
-# library(reticulate)
-library(caret)
+library(ggplot2)
+library(ISLR)
+library(dplyr)
 library(tidyverse)
+library(caret)
+library(glmnet)
+library(e1071)
+library(plotmo)
+library(splines)
+library(mgcv)
+library(pdp)
+library(earth)
+library(RNHANES)
+library(leaps)
+library(mlbench)
+library(pROC)
+library(vip)
+library(AppliedPredictiveModeling)
+library(gridExtra)
+library(mvtnorm)
+library(MASS)
+library(class)
+library(klaR)
+# library(reticulate)
 library(ggpubr)
 library(doParallel)
 library(ranger)
-library(pROC)
 library(gbm)
 library(pdp)
 library(lime)
@@ -63,6 +83,18 @@ set.seed(1)
 train_index = createDataPartition(df$price_range,p=0.8,list = F)
 train_df = df[train_index, ]
 test_df = df[-train_index, ]
+
+# train data
+x_train <- model.matrix(price_range ~ ., df)[train_index, -21]
+y_train <- df$price_range[train_index]
+data_train <- subset(df[train_index,])
+
+# test data
+x_test <- model.matrix(price_range ~ ., df)[-train_index,-21]
+y_test <- df$price_range[-train_index]
+
+ctrl <- trainControl(method = "cv", classProbs = TRUE, 
+                     summaryFunction = twoClassSummary) 
 ```
 
 
@@ -72,13 +104,78 @@ cl <- makePSOCKcluster(4)
 registerDoParallel(cl)
 ```
 
+## model fitting
 
-## Bagging
+### logistic model
+```{r}
+set.seed(1)
+glm.fit = glm(price_range ~.,data = df, subset = train_index, family = binomial(link = 'logit'))
+summary(glm.fit)
+
+#glm by caret
+glm.fit = train(x = df[train_index,-c(2,4,6,18:20)],
+                y = df$price_range[train_index],
+                method = "glm",
+                metric = "ROC",
+                trControl = ctrl)
+summary(glm.fit)
+```
+
+```{r}
+#confusion matrix for test data
+test.pred.prob = predict(glm.fit, newdata = df[-train_index,],
+                         type = "response")
+test.pred = rep("high", length(test.pred.prob))
+test.pred[test.pred.prob > 0.5] = "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = df$price_range[-train_index],
+                positive = "low")
+
+```
+
+
+```{r}
+##confusion matrix for train data
+test.pred.prob = predict(glm.fit, newdata =  df[train_index,],
+                          type = "response")
+test.pred = rep("high", length(test.pred.prob))
+test.pred[test.pred.prob > 0.5] = "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = df$price_range[train_index,],
+                positive = "low")
+```
+
+
+### Penalized logistic regression
+```{r}
+set.seed(1)
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
+.lambda = exp(seq(-8, -2, length = 20)))
+set.seed(1)
+model.glmn <- train(x = train[,-c(2,4,6,18:20)],
+                    y = train$price,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    metric = "ROC",
+                    trControl = ctrl)
+summary(model.glmn)
+
+glmn.pred <- predict(model.glmn, newdata = test, type = "prob")[,2]
+roc.glmn <- roc(test$price, glmn.pred)
+```
+
+```{r}
+#confusion matrix
+test.pred <- rep("high", length(glmn.pred))
+test.pred[glmn.pred > 0.5] <- "low"
+confusionMatrix(data = as.factor(test.pred),
+                reference = data$price[-indexTrain],
+                positive = "low")
+```
+
+### Bagging
 
 ```{r }
-ctrl <- trainControl(method = "cv", classProbs = TRUE, 
-                     summaryFunction = twoClassSummary) 
-
 bagging.grid <- expand.grid(mtry = 20, # mtry = number of the predictors
                        splitrule = "gini",
                        min.node.size = seq(from = 2, to = 10, by = 2))
@@ -124,7 +221,7 @@ barplot(sort(ranger::importance(bagging.final.imp), decreasing = FALSE),
 ```
 
 
-## Random forest
+### Random forest
 
 ```{r }
 ctrl <- trainControl(method = "cv", classProbs = TRUE, 
@@ -148,7 +245,7 @@ ggplot(rf.fit, highlight = TRUE)
 ```
 
 
-## AdaBoost
+### AdaBoost
 
 ```{r }
 gbm.grid <- expand.grid(n.trees = c(2000,3000,4000,5000), 
@@ -172,7 +269,7 @@ ggplot(gbm.fit, highlight = TRUE)
 ```
 
 
-## SVM
+### SVM
 
 ```{r }
 # Tune over cost
@@ -195,6 +292,10 @@ plot(svm.fit)
 
 
 ## ROC camparison
+```{r}
+test.pred.prob = predict(glm.fit, newdata = df[-train_index,], type = "response")
+roc.glm = roc(df$price_range[-train_index,], test.pred.prob)
+```
 
 ```{r}
 pred.bagging = predict(bagging.fit, newdata = df[-train_index, ], type = "prob")[,1]
