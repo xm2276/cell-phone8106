@@ -107,6 +107,9 @@ featurePlot(x,
                           y=list(relation="free")),
             plot = "density", pch = "|", 
             auto.key = list(columns = 2))
+
+# Correlation plot
+pairs(df)
 ```
 
 ## model fitting
@@ -124,6 +127,15 @@ summary(glm.fit)
 ```
 
 ```{r}
+#confusion matrix for train data
+train.pred.prob = predict(glm.fit, newdata = df[train_index,],
+                         type = "prob")
+train.pred = factor(colnames(train.pred.prob)[max.col(train.pred.prob)])
+confusionMatrix(train.pred,
+                df$price_range[train_index],
+                "High")
+# Accuracy: 0.998
+
 #confusion matrix for test data
 test.pred.prob = predict(glm.fit, newdata = df[-train_index,],
                          type = "prob")
@@ -131,17 +143,18 @@ test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
 confusionMatrix(test.pred,
                 df$price_range[-train_index],
                 "High")
-# Accuracy of test data classification: 0.985```
+# Accuracy of test data classification: 0.985
+```
 
 
 ### Penalized logistic regression
 ```{r}
 set.seed(1)
-glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 6),
-.lambda = exp(seq(-8, -2, length = 20)))
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 20),
+.lambda = exp(seq(-8, -2, length = 100)))
 set.seed(1)
 #-c(2,4,6,18:21)
-glmn.fit <- train(x = train_df[, -c(2,4,6,18:22)],
+glmn.fit <- train(x = train_df[, c(1:20)],
                   y = train_df$price_range,
                   method = "glmnet",
                   tuneGrid = glmnGrid,
@@ -151,15 +164,25 @@ summary(glmn.fit)
 ```
 
 ```{r}
-#confusion matrix for the test data
-# test.pred.prob = predict(glmn.fit, newdata = df[-train_index,],
-#                          type = "prob")
-# test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
-# confusionMatrix(test.pred,
-#                 df$price_range[-train_index],
-#                 "High")
+my.col = rainbow(25)
+mypar = list(superpose.symbol = list(col = my.col),
+             superpose.line = list(col = my.col))
 
-#confusion matrix
+plot(glmn.fit, par.settings = mypar)
+coef(glmn.fit$finalModel, glmn.fit$bestTune$lambda)
+```
+
+```{r}
+#confusion matrix for the train data
+test.pred.prob = predict(glmn.fit, newdata = df[train_index,],
+                         type = "prob")
+test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+confusionMatrix(test.pred,
+                df$price_range[train_index],
+                "High")
+# Accuracy of train data classification: 0.993
+
+#confusion matrix for test data
 glmn.pred <- predict(glmn.fit, newdata = df[-train_index,], type = "prob")[,1]
 test.pred <- rep("Low", length(glmn.pred))
 test.pred[glmn.pred > 0.5] <- "High"
@@ -172,16 +195,21 @@ confusionMatrix(data = as.factor(test.pred),
 
 ### MARS
 ```{r}
-#[,-c(2,4,6,18:21)]
 set.seed(1)
 mars.fit = train(x = train_df[,c(1:20)],
                  y = train_df$price_range,
                  method = "earth",
-                 tuneGrid = expand.grid(degree = 1:3,nprune = 2:25),
+                 tuneGrid = expand.grid(degree = 1:3,nprune = 2:20),
                  metric = "ROC", 
                  trControl = ctrl)
+mars.fit$bestTune
+summary(mars.fit$finalModel)
+ggplot(mars.fit)
+
 coef(mars.fit$finalModel)
+# variable importance for MARS model
 vip(mars.fit$finalModel)
+# Partial Dependence Plot
 pdp::partial(mars.fit, pred.var = c("ram"), grid.resolution = 200) %>% autoplot()
 pdp::partial(mars.fit, pred.var = c("px_height"), grid.resolution = 200) %>% autoplot()
 pdp::partial(mars.fit, pred.var = c("px_width"), grid.resolution = 200) %>% autoplot()
@@ -189,7 +217,7 @@ pdp::partial(mars.fit, pred.var = c("px_width"), grid.resolution = 200) %>% auto
 
 
 ```{r}
-#confusion matrix
+#confusion matrix for test data
 test.pred.prob = predict(mars.fit, newdata = df[-train_index,],
                          type = "prob")
 test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
@@ -233,6 +261,7 @@ bagging.fit <- train(price_range ~ . ,
 ggplot(bagging.fit, highlight = TRUE)
 ```
 
+
 ```{r}
 # Permutation based importance
 set.seed(1)
@@ -264,9 +293,6 @@ barplot(sort(ranger::importance(bagging.final.imp), decreasing = FALSE),
 ### Random forest
 
 ```{r }
-ctrl <- trainControl(method = "cv", classProbs = TRUE, 
-                     summaryFunction = twoClassSummary) 
-
 rf.grid <- expand.grid(mtry = 1:8, 
                        splitrule = "gini",
                        min.node.size = seq(from = 2, to = 10, by = 2))
@@ -324,6 +350,7 @@ svm.fit = train(price_range ~ . ,
                 prob.model = TRUE,
                 verbose = FALSE)
 summary(svm.fit)
+svm.fit$bestTune
 ```
 
 ```{r}
@@ -341,9 +368,7 @@ pred.mars <- predict(mars.fit, newdata = df[-train_index, ], type = "prob")[,1]
 roc.mars <- pROC::roc(df$price_range[-train_index], pred.mars)
 pred.gam = predict(gam.fit, newdata = df[-train_index,], type = "prob")[,1]
 roc.gam = pROC::roc(df$price_range[-train_index], pred.gam)
-```
 
-```{r}
 pred.bagging = predict(bagging.fit, newdata = df[-train_index, ], type = "prob")[,1]
 roc.bagging = pROC::roc(df$price_range[-train_index], pred.bagging)
 pred.rf = predict(rf.fit, newdata = df[-train_index, ], type = "prob")[,1]
@@ -362,7 +387,7 @@ plot(roc.rf, add = TRUE, col = 6)
 plot(roc.gbm, add = TRUE, col = 7)
 plot(roc.svm, add = TRUE, col = 8)
 auc <- c(roc.glm$auc[1], roc.glmn$auc[1], roc.mars$auc[1], roc.gam$auc[1], roc.bagging$auc[1], roc.rf$auc[1], roc.gbm$auc[1], roc.svm$auc[1])
-modelNames <- c("Glm", "Glmn", "MARS", "GAM", "Bagging", "RF","Adaboost", "SVM") 
+modelNames <- c("GLM", "GLMN", "MARS", "GAM", "Bagging", "RF","Adaboost", "SVM") 
 legend("bottomright", 
        legend = paste0(modelNames, ": ", 
                        round(auc,3)), 
@@ -373,6 +398,7 @@ legend("bottomright",
 ## Global Importance
 
 ```{r}
+# Ada boosting
 gbmImp <- varImp(gbm.fit, scale = TRUE)
 plot(gbmImp, top = 10)
 ```
@@ -381,6 +407,7 @@ plot(gbmImp, top = 10)
 ## LIME
 
 ```{r fig.height=18, fig.width=12}
+set.seed(1)
 explainer.rf <- lime(df[train_index, -21], gbm.fit)
 new_obs = df[-train_index, -21][1:6, ]
 explaination.obs = explain(new_obs, 
@@ -393,17 +420,32 @@ plot_features(explaination.obs)
 ## Prediction error
 
 ```{r}
+pred.mars.train = predict(mars.fit, newdata = df[train_index, ], type = "prob")[, 1]
+train_df$pred.mars = pred.mars.train
+cp.mars <- cutpointr(train_df, pred.mars, price_range, 
+                method = maximize_metric, metric = sum_sens_spec)
+summary(cp.mars)
+```
+
+```{r}
+test_df$pred.mars = as.factor(ifelse(pred.mars > cp$optimal_cutpoint, "High", "Low"))
+cft.mars = confusionMatrix(test_df$pred.mars, test_df$price_range)
+print(cft.mars)
+```
+
+
+```{r}
 pred.gbm.train = predict(gbm.fit, newdata = df[train_index, ], type = "prob")[, 1]
 train_df$pred.gbm = pred.gbm.train
-cp <- cutpointr(train_df, pred.gbm, price_range, 
+cp.gbm <- cutpointr(train_df, pred.gbm, price_range, 
                 method = maximize_metric, metric = sum_sens_spec)
-summary(cp)
+summary(cp.gbm)
 ```
 
 ```{r}
 test_df$pred.gbm = as.factor(ifelse(pred.gbm > cp$optimal_cutpoint, "High", "Low"))
-cft = confusionMatrix(test_df$pred.gbm, test_df$price_range)
-print(cft)
+cft.gbm = confusionMatrix(test_df$pred.gbm, test_df$price_range)
+print(cft.gbm)
 ```
 
 * Since we have response variables, we consider the problem to be supervised learning. Therefore, the unsupervised learning methods (such as clustering and deep learning) are not suitable for this problem.

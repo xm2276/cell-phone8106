@@ -39,7 +39,7 @@ set.seed(2022)
 ```
 
 ```{r}
-data1 = read.csv("/Users/xiao/Desktop/train.csv") %>% 
+data1 = read.csv("./data/train.csv") %>% 
   janitor::clean_names() %>%
   mutate(blue = as.factor(blue),
          dual_sim = as.factor(dual_sim),
