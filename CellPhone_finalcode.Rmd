@@ -1,0 +1,447 @@
+---
+title: "cell_phone_final_code"
+author: "XIAO MA, HAO ZHENG, YONGZI YU"
+date: "5/12/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.height = 8,
+  fig.width = 12,
+  dpi = 200, 
+  message = F,
+  echo = T,
+  warning = F,
+  cache = T
+)
+# theme_set(theme_minimal() + theme(
+#   legend.position = "bottom",
+#   plot.title = element_text(hjust = 0.5)
+# ))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  digits = 3
+)
+# scale_colour_discrete = scale_colour_viridis_d
+# scale_fill_discrete = scale_fill_viridis_d
+```
+
+
+```{r}
+library(ggplot2)
+library(ISLR)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(e1071)
+library(plotmo)
+library(splines)
+library(mgcv)
+library(pdp)
+library(earth)
+library(RNHANES)
+library(leaps)
+library(mlbench)
+library(pROC)
+library(vip)
+library(AppliedPredictiveModeling)
+library(gridExtra)
+library(mvtnorm)
+library(MASS)
+library(class)
+library(klaR)
+# library(reticulate)
+library(ggpubr)
+library(doParallel)
+library(ranger)
+library(gbm)
+library(pdp)
+library(lime)
+library(cutpointr)
+```
+
+```{r}
+# read data
+df = read.csv("data/train.csv")
+
+# covert outcome to binary
+df$price_range = as.factor(ifelse(df$price_range >= 2, "High", "Low"))
+
+# convert data format
+df = df %>% 
+    mutate_at(vars("blue", "dual_sim", "four_g", "three_g", "touch_screen", "wifi"), 
+              ~factor(., levels = c(0, 1), labels = c("No", "Yes")))
+```
+
+
+```{r data_preprocess}
+# split into training set
+set.seed(1)
+train_index = createDataPartition(df$price_range,p=0.8,list = F)
+train_df = df[train_index,]
+test_df = df[-train_index,]
+
+ctrl <- trainControl(method = "cv", classProbs = TRUE, 
+                     summaryFunction = twoClassSummary) 
+```
+
+```{r}
+# user parallel to accelarate 
+cl <- makePSOCKcluster(4)
+registerDoParallel(cl)
+```
+
+```{r}
+#graphical summary: Feature plot
+x = train_df[,-c(2,4,6,18:21)]
+y = train_df$price_range
+
+theme1 = transparentTheme(trans = .4)
+trellis.par.set(theme1)
+featurePlot(x,
+            y,
+            scales = list(x=list(relation="free"), 
+                          y=list(relation="free")),
+            plot = "density", pch = "|", 
+            auto.key = list(columns = 2))
+
+# Correlation plot
+pairs(df)
+```
+
+## model fitting
+
+### logistic model
+```{r}
+set.seed(1)
+#glm by caret
+glm.fit = train(x = train_df[, c(1:20)],
+                y = train_df$price_range,
+                method = "glm",
+                metric = "ROC",
+                trControl = ctrl)
+summary(glm.fit)
+```
+
+```{r}
+#confusion matrix for train data
+train.pred.prob = predict(glm.fit, newdata = df[train_index,],
+                         type = "prob")
+train.pred = factor(colnames(train.pred.prob)[max.col(train.pred.prob)])
+confusionMatrix(train.pred,
+                df$price_range[train_index],
+                "High")
+# Accuracy: 0.998
+
+#confusion matrix for test data
+test.pred.prob = predict(glm.fit, newdata = df[-train_index,],
+                         type = "prob")
+test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+confusionMatrix(test.pred,
+                df$price_range[-train_index],
+                "High")
+# Accuracy of test data classification: 0.985
+```
+
+
+### Penalized logistic regression
+```{r, warning=FALSE}
+set.seed(1)
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 20),
+.lambda = exp(seq(-8, -2, length = 100)))
+set.seed(1)
+#-c(2,4,6,18:21)
+glmn.fit <- train(x = train_df[, -c(2,4,6,18:21)],
+                  y = train_df$price_range,
+                  method = "glmnet",
+                  tuneGrid = glmnGrid,
+                  metric = "ROC",
+                  trControl = ctrl)
+summary(glmn.fit)
+```
+
+```{r}
+my.col = rainbow(25)
+mypar = list(superpose.symbol = list(col = my.col),
+             superpose.line = list(col = my.col))
+
+plot(glmn.fit, par.settings = mypar)
+coef(glmn.fit$finalModel, glmn.fit$bestTune$lambda)
+```
+
+```{r}
+#confusion matrix for the train data
+test.pred.prob = predict(glmn.fit, newdata = df[train_index,],
+                         type = "prob")
+test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+confusionMatrix(test.pred,
+                df$price_range[train_index],
+                "High")
+
+#confusion matrix for test data
+glmn.pred <- predict(glmn.fit, newdata = df[-train_index,], type = "prob")[,1]
+test.pred <- rep("Low", length(glmn.pred))
+test.pred[glmn.pred > 0.5] <- "High"
+confusionMatrix(data = as.factor(test.pred),
+                reference = df$price_range[-train_index],
+                positive = "High")
+```
+
+
+### MARS
+```{r}
+set.seed(1)
+mars.fit = train(x = train_df[,c(1:20)],
+                 y = train_df$price_range,
+                 method = "earth",
+                 tuneGrid = expand.grid(degree = 1:3,nprune = 2:20),
+                 metric = "ROC", 
+                 trControl = ctrl)
+mars.fit$bestTune
+summary(mars.fit$finalModel)
+ggplot(mars.fit)
+
+coef(mars.fit$finalModel)
+# variable importance for MARS model
+vip(mars.fit$finalModel)
+# Partial Dependence Plot
+pdp::partial(mars.fit, pred.var = c("ram"), grid.resolution = 200) %>% autoplot()
+pdp::partial(mars.fit, pred.var = c("px_height"), grid.resolution = 200) %>% autoplot()
+pdp::partial(mars.fit, pred.var = c("px_width"), grid.resolution = 200) %>% autoplot()
+```
+
+
+```{r}
+#confusion matrix for test data
+test.pred.prob = predict(mars.fit, newdata = df[-train_index,],
+                         type = "prob")
+test.pred = factor(colnames(test.pred.prob)[max.col(test.pred.prob)])
+confusionMatrix(test.pred,
+                df$price_range[-train_index],
+                "High")
+# Accuracy of test data classification: 0.98
+```
+
+
+### GAM
+```{r}
+set.seed(1)
+gam.fit = train(x = train_df[, c(1:20)],
+                y = train_df$price_range,
+                method = "gam", 
+                metric = "ROC",
+                trControl = ctrl)
+gam.fit$finalModel
+summary(gam.fit)
+```
+
+
+### Bagging
+
+```{r }
+bagging.grid <- expand.grid(mtry = 20, # mtry = number of the predictors
+                       splitrule = "gini",
+                       min.node.size = seq(from = 2, to = 10, by = 2))
+set.seed(1) 
+bagging.fit <- train(price_range ~ . , 
+                df, 
+                subset = train_index, 
+                tuneGrid = bagging.grid, 
+                method = "ranger",
+                metric = "ROC",
+                trControl = ctrl)
+```
+
+```{r}
+ggplot(bagging.fit, highlight = TRUE)
+```
+
+
+```{r}
+# Permutation based importance
+set.seed(1)
+bagging.final.per <- ranger(price_range ~.,
+                       df[train_index, ],
+                       mtry = bagging.fit$bestTune[[1]],
+                       splitrule = "gini",
+                       min.node.size = bagging.fit$bestTune[[3]],
+                       importance = "permutation",
+                       scale.permutation.importance = TRUE)
+barplot(sort(ranger::importance(bagging.final.per), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan", "blue"))(20))
+
+# Impurity based importance
+set.seed(1)
+bagging.final.imp <- ranger(price_range~ .,
+                       df[train_index, ],
+                       mtry = bagging.fit$bestTune[[1]],
+                       splitrule = "gini",
+                       min.node.size = bagging.fit$bestTune[[3]],
+                       importance = "impurity")
+barplot(sort(ranger::importance(bagging.final.imp), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan", "blue"))(20))
+```
+
+
+### Random forest
+
+```{r }
+rf.grid <- expand.grid(mtry = 1:8, 
+                       splitrule = "gini",
+                       min.node.size = seq(from = 2, to = 10, by = 2))
+set.seed(1) 
+rf.fit <- train(price_range ~ . , 
+                df, 
+                subset = train_index, 
+                tuneGrid = rf.grid, 
+                method = "ranger",
+                metric = "ROC",
+                trControl = ctrl)
+```
+
+```{r}
+ggplot(rf.fit, highlight = TRUE)
+```
+
+
+### AdaBoost
+
+```{r }
+gbm.grid <- expand.grid(n.trees = c(2000,3000,4000,5000), 
+                        interaction.depth = 1:6, 
+                        shrinkage = c(0.0005,0.001,0.002), 
+                        n.minobsinnode = 1)
+set.seed(1) 
+gbm.fit <- train(price_range ~ . , 
+                 df, 
+                 subset = train_index, 
+                 tuneGrid = gbm.grid, 
+                 trControl = ctrl,
+                 method = "gbm",
+                 distribution = "adaboost",
+                 metric = "ROC",
+                 verbose = FALSE)
+```
+
+```{r}
+ggplot(gbm.fit, highlight = TRUE)
+```
+
+
+### SVM
+
+```{r }
+# Tune over cost
+set.seed(1)
+svm.fit = train(price_range ~ . , 
+                df, 
+                subset = train_index, 
+                method = "svmRadialCost",
+                tuneGrid = data.frame(C = exp(seq(-3,3,len=20))),
+                trControl = ctrl,
+                metric = "ROC",
+                prob.model = TRUE,
+                verbose = FALSE)
+summary(svm.fit)
+svm.fit$bestTune
+```
+
+```{r}
+plot(svm.fit)
+```
+
+
+## ROC camparison
+```{r}
+pred.glm = predict(glm.fit, newdata = df[-train_index,], type = "prob")[,1]
+roc.glm = pROC::roc(df$price_range[-train_index], pred.glm)
+pred.glmn <- predict(glmn.fit, newdata = df[-train_index,], type = "prob")[,1]
+roc.glmn <- pROC::roc(df$price_range[-train_index], pred.glmn)
+pred.mars <- predict(mars.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.mars <- pROC::roc(df$price_range[-train_index], pred.mars)
+pred.gam = predict(gam.fit, newdata = df[-train_index,], type = "prob")[,1]
+roc.gam = pROC::roc(df$price_range[-train_index], pred.gam)
+
+pred.bagging = predict(bagging.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.bagging = pROC::roc(df$price_range[-train_index], pred.bagging)
+pred.rf = predict(rf.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.rf = pROC::roc(df$price_range[-train_index], pred.rf)
+pred.gbm = predict(gbm.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.gbm = pROC::roc(df$price_range[-train_index], pred.gbm)
+pred.svm = predict(svm.fit, newdata = df[-train_index, ], type = "prob")[,1]
+roc.svm = pROC::roc(df$price_range[-train_index], pred.svm)
+
+plot(roc.glm, col = 1) 
+plot(roc.glmn, add = TRUE, col = 2)
+plot(roc.mars, add = TRUE, col = 3)
+plot(roc.gam, add = TRUE, col = 4)
+plot(roc.bagging, add = TRUE, col = 5) 
+plot(roc.rf, add = TRUE, col = 6)
+plot(roc.gbm, add = TRUE, col = 7)
+plot(roc.svm, add = TRUE, col = 8)
+auc <- c(roc.glm$auc[1], roc.glmn$auc[1], roc.mars$auc[1], roc.gam$auc[1], roc.bagging$auc[1], roc.rf$auc[1], roc.gbm$auc[1], roc.svm$auc[1])
+modelNames <- c("GLM", "GLMN", "MARS", "GAM", "Bagging", "RF","Adaboost", "SVM") 
+legend("bottomright", 
+       legend = paste0(modelNames, ": ", 
+                       round(auc,3)), 
+       col = 2:4, lty = 1, cex=0.8, pt.cex = 1)
+```
+
+
+## Global Importance
+
+```{r}
+# Ada boosting
+gbmImp <- varImp(gbm.fit, scale = TRUE)
+plot(gbmImp, top = 10)
+```
+
+
+## LIME
+
+```{r fig.height=18, fig.width=12}
+set.seed(1)
+explainer.rf <- lime(df[train_index, -21], gbm.fit)
+new_obs = df[-train_index, -21][1:6, ]
+explaination.obs = explain(new_obs, 
+                           explainer = explainer.rf,
+                           n_features = 10,
+                           n_labels = 2)
+plot_features(explaination.obs)
+```
+
+## Prediction error
+
+```{r}
+# pred.mars.train = predict(mars.fit, newdata = df[train_index, ], type = "prob")[, 1]
+# train_df$pred.mars = pred.mars.train
+# cp.mars <- cutpointr(train_df, pred.mars, price_range, 
+#                 method = maximize_metric, metric = sum_sens_spec)
+# summary(cp.mars)
+```
+
+```{r}
+# test_df$pred.mars = as.factor(ifelse(pred.mars > cp$optimal_cutpoint, "High", "Low"))
+# cft.mars = confusionMatrix(test_df$pred.mars, test_df$price_range)
+# print(cft.mars)
+```
+
+
+```{r}
+pred.gbm.train = predict(gbm.fit, newdata = df[train_index, ], type = "prob")[, 1]
+train_df$pred.gbm = pred.gbm.train
+cp.gbm <- cutpointr(train_df, pred.gbm, price_range, 
+                method = maximize_metric, metric = sum_sens_spec)
+summary(cp.gbm)
+```
+
+```{r}
+test_df$pred.gbm = as.factor(ifelse(pred.gbm > cp$optimal_cutpoint, "High", "Low"))
+cft.gbm = confusionMatrix(test_df$pred.gbm, test_df$price_range)
+print(cft.gbm)
+```
