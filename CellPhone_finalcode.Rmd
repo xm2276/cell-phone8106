@@ -435,13 +435,13 @@ plot_features(explaination.obs)
 ```{r}
 pred.gbm.train = predict(gbm.fit, newdata = df[train_index, ], type = "prob")[, 1]
 train_df$pred.gbm = pred.gbm.train
-cp.gbm <- cutpointr(train_df, pred.gbm, price_range, 
+cp <- cutpointr(train_df, pred.gbm, price_range, 
                 method = maximize_metric, metric = sum_sens_spec)
-summary(cp.gbm)
+summary(cp)
 ```
 
 ```{r}
 test_df$pred.gbm = as.factor(ifelse(pred.gbm > cp$optimal_cutpoint, "High", "Low"))
-cft.gbm = confusionMatrix(test_df$pred.gbm, test_df$price_range)
-print(cft.gbm)
+cft = confusionMatrix(test_df$pred.gbm, test_df$price_range)
+print(cft)
 ```
